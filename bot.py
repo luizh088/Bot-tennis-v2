@@ -8,7 +8,6 @@ CHAT_ID = os.environ['CHAT_ID']
 bot = Bot(token=BOT_TOKEN)
 
 games_notifications = {}
-blocked_game = None
 
 async def fetch_live_events(session):
     url = 'https://api.sofascore.com/api/v1/sport/tennis/events/live'
@@ -23,15 +22,10 @@ async def fetch_point_by_point(session, event_id):
         return await response.json()
 
 async def process_game(session, event):
-    global blocked_game
-
-    # Filtra torneios
     tournament_category = event['tournament']['category']['slug']
-    if tournament_category not in ['atp', 'challenger']:
-        return
 
-    # Filtra se não é simples
-    if event['homeTeam']['type'] != 1 or event['awayTeam']['type'] != 1:
+    if tournament_category not in ['atp', 'challenger'] or event['homeTeam']['type'] != 1 or event['awayTeam']['type'] != 1:
+        print(f"Ignorando torneio não ATP/Challenger: {tournament_category}")
         return
 
     event_id = event['id']
@@ -40,95 +34,76 @@ async def process_game(session, event):
     game_slug = f"{home_name} x {away_name}"
 
     point_data = await fetch_point_by_point(session, event_id)
+
     if "pointByPoint" not in point_data or not point_data["pointByPoint"]:
+        print(f"Jogo {game_slug} sem dados ponto a ponto disponíveis.")
         return
 
-    # Pegar o último set
-    last_set = point_data["pointByPoint"][-1]
-    if "games" not in last_set or not last_set["games"]:
-        return
+    current_set = point_data["pointByPoint"][0]
+    current_game = current_set["games"][0]
 
-    # Pegar o último game do último set
-    current_game = last_set["games"][-1]
     if not current_game or not current_game.get("points"):
+        print(f"Jogo {game_slug} sem pontos disponíveis no game atual.")
         return
 
     current_game_number = current_game["game"]
     serving = current_game["score"]["serving"]
-    scoring = current_game["score"].get("scoring", -1)
 
     server_name = home_name if serving == 1 else away_name
     receiver_name = away_name if serving == 1 else home_name
 
-    # 1) Se o game já está concluído, só notifica se for o MESMO game do bloqueio
-    if scoring != -1:
-        if blocked_game == (event_id, current_game_number):
-            # Avisa quem ganhou o game, se ainda não avisamos
-            if games_notifications.get(f"completed_{event_id}") != current_game_number:
-                winner = scoring
-                emoji = "✅" if winner == serving else "❌"
-                if winner == serving:
-                    message = f"{emoji} {server_name} venceu o game de saque ({game_slug}, game {current_game_number})."
-                else:
-                    message = f"{emoji} {server_name} perdeu o game de saque ({game_slug}, game {current_game_number})."
-
-                await bot.send_message(chat_id=CHAT_ID, text=message)
-                print(f"[NOTIFICAÇÃO] {message}")
-                games_notifications[f"completed_{event_id}"] = current_game_number
-
-            # Libera bloqueio
-            blocked_game = None
-            print(f"[INFO] Game {current_game_number} finalizado e bloqueio liberado.")
-        return
-
-    # 2) Se o game NÃO está concluído, checar se perdeu 2 pontos
     points = current_game["points"]
-    if len(points) < 2:
-        return
 
-    home_first_point = points[0]["homePoint"]
-    away_first_point = points[0]["awayPoint"]
-    home_second_point = points[1]["homePoint"]
-    away_second_point = points[1]["awayPoint"]
+    home_point = points[0]["homePoint"]
+    away_point = points[0]["awayPoint"]
 
+    # Verifica se o sacador perdeu o primeiro ponto
     sacador_perdeu_primeiro_ponto = (
-        (serving == 1 and home_first_point == "0") or
-        (serving == 2 and away_first_point == "0")
-    )
-    sacador_perdeu_segundo_ponto = (
-        (serving == 1 and home_second_point == "0") or
-        (serving == 2 and away_second_point == "0")
+        (serving == 1 and home_point == "0") or
+        (serving == 2 and away_point == "0")
     )
 
-    is_tie_break = last_set.get("tieBreak", False)
+    # -- REMOVIDO O TRECHO QUE NOTIFICAVA AO PERDER APENAS O PRIMEIRO PONTO --
 
-    # Cria chave para não notificar duas vezes no mesmo game
-    lost2points_key = f"lost2points_{event_id}_{current_game_number}"
-    if sacador_perdeu_primeiro_ponto and sacador_perdeu_segundo_ponto and not is_tie_break:
-        # Só notifica se:
-        #  - não existe bloqueio de outro game
-        #  - ainda não notificamos esse game
-        if blocked_game is None and lost2points_key not in games_notifications:
-            message = (
-                f"⚠️ {server_name} perdeu os DOIS primeiros pontos sacando contra "
-                f"{receiver_name} ({game_slug}, game {current_game_number})."
-            )
-            await bot.send_message(chat_id=CHAT_ID, text=message)
-            print(f"[NOTIFICAÇÃO] {message}")
-            # Marca que este game recebeu a notificação
-            games_notifications[lost2points_key] = True
-            # Ativa bloqueio
-            blocked_game = (event_id, current_game_number)
+    # Se já perdeu o primeiro ponto, verificamos se perdeu também o segundo
+    if sacador_perdeu_primeiro_ponto and len(points) >= 2:
+        second_point = points[1]
+        home_second_point = second_point["homePoint"]
+        away_second_point = second_point["awayPoint"]
+
+        sacador_perdeu_segundo_ponto = (
+            (serving == 1 and home_second_point == "0") or
+            (serving == 2 and away_second_point == "0")
+        )
+
+        # Se perdeu o segundo ponto também...
+        if sacador_perdeu_segundo_ponto:
+            # Abaixo, verifica se o game já tem um vencedor (score != -1) 
+            # e, se sim, envia notificação de game concluído.
+            if "scoring" in current_game["score"] and current_game["score"]["scoring"] != -1:
+                if games_notifications.get(f"completed_{event_id}") != current_game_number:
+                    winner = current_game["score"]["scoring"]
+                    emoji = "✅" if winner == serving else "❌"
+                    if winner == serving:
+                        message = f"{emoji} {server_name} venceu o game de saque ({game_slug}, game {current_game_number})."
+                    else:
+                        message = f"{emoji} {server_name} perdeu o game de saque ({game_slug}, game {current_game_number})."
+
+                    await bot.send_message(chat_id=CHAT_ID, text=message)
+                    print(f"Notificação enviada: {message}")
+                    games_notifications[f"completed_{event_id}"] = current_game_number
 
 async def monitor_all_games():
+    # Mensagem de teste assim que o bot inicia
     await bot.send_message(chat_id=CHAT_ID, text="✅ Bot iniciado corretamente e enviando notificações!")
-    print("Mensagem de teste enviada ao Telegram.")
+    print("Mensagem teste enviada ao Telegram.")
 
     async with aiohttp.ClientSession() as session:
         while True:
             try:
                 live_events = await fetch_live_events(session)
                 events = live_events.get('events', [])
+                print(f"Número de jogos sendo monitorados: {len(events)}")
 
                 tasks = [process_game(session, event) for event in events]
                 await asyncio.gather(*tasks)
@@ -140,7 +115,7 @@ async def monitor_all_games():
 
 if __name__ == '__main__':
     try:
-        print("Bot inicializando corretamente (apenas GAMES que perderam 2 pontos).")
+        print("Bot inicializando corretamente.")
         asyncio.run(monitor_all_games())
     except Exception as e:
         print(f"Erro fatal ao iniciar o bot: {e}")
