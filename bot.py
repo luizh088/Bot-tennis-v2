@@ -1,17 +1,15 @@
 import os
 import asyncio
 import aiohttp
+import pprint
 from telegram import Bot
 
-BOT_TOKEN = os.environ['BOT_TOKEN']
-CHAT_ID = os.environ['CHAT_ID']
+BOT_TOKEN = os.environ["BOT_TOKEN"]
+CHAT_ID = os.environ["CHAT_ID"]
 bot = Bot(token=BOT_TOKEN)
 
-# Bloqueio global. Se for None, não há bloqueio ativo.
-# Se estiver definido, armazena (event_id, set_number, game_number).
-global_current_lock = None
-
-# Armazena dados do game bloqueante (ex.: quem saca, para msg final).
+# -------------- BLOQUEIO GLOBAL --------------
+global_current_lock = None  # (event_id, set_number, game_number)
 lost_first_two_info = {}
 
 async def fetch_live_events(session):
@@ -30,12 +28,12 @@ async def process_game(session, event):
     global global_current_lock
     global lost_first_two_info
 
-    # Filtra torneios fora de atp/challenger
+    # Filtra torneios
     tournament_category = event["tournament"]["category"]["slug"]
     if tournament_category not in ["atp", "challenger"]:
         return
 
-    # Filtra partidas de simples (type=1)
+    # Filtra partidas de simples
     if event["homeTeam"]["type"] != 1 or event["awayTeam"]["type"] != 1:
         return
 
@@ -44,73 +42,102 @@ async def process_game(session, event):
     away_name = event["awayTeam"]["shortName"]
     game_slug = f"{home_name} x {away_name}"
 
-    # Dados "point-by-point"
     point_data = await fetch_point_by_point(session, event_id)
     if "pointByPoint" not in point_data or not point_data["pointByPoint"]:
         return
 
-    # Geralmente o set em andamento é o último no array:
+    # --------------------------------------------
+    # A) Impressão de debug: todo pointByPoint
+    # --------------------------------------------
     sets_data = point_data["pointByPoint"]
-    current_set = sets_data[-1]  # Se no SofaScore o último for o set em andamento
+    print(f"\n[DEBUG] event_id={event_id}, {game_slug}")
+    print(f"[DEBUG] sets_data length = {len(sets_data)}")
+    for idx, s in enumerate(sets_data):
+        set_num = s.get("number")
+        set_status = s.get("status")  # por ex. "finished", "inprogress"
+        print(f"   [DEBUG] idx={idx}, set_number={set_num}, status={set_status}, #games={len(s.get('games', []))}")
+
+    # --------------------------------------------
+    # B) Aqui está a parte crucial: qual set escolhemos?
+    #    (Muitos usam 'sets_data[-1]' achando que é o set em andamento)
+    # --------------------------------------------
+    # Exemplo: pegando SEMPRE o último do array
+    current_set = sets_data[-1]
+
+    # Log de debug do set escolhido
+    print("[DEBUG] Chosen set (last in array):")
+    pprint.pprint(current_set)
+
+    # Se não tiver games, sair
     if not current_set.get("games"):
+        print("[DEBUG] O set escolhido não possui 'games'.")
         return
 
-    # Pega o último game do set
+    # --------------------------------------------
+    # C) Pegando o último game do set escolhido.
+    # --------------------------------------------
     current_game = current_set["games"][-1]
+
+    # Impressão de debug do game escolhido
+    print("[DEBUG] Chosen game (last in chosen set):")
+    pprint.pprint(current_game)
+
     if not current_game.get("points"):
+        print("[DEBUG] current_game não tem 'points'.")
         return
 
-    # Identificação do set: use "number" ou o índice do array
+    # Identificando set_number
     set_number = current_set["number"] if "number" in current_set else len(sets_data)
     current_game_number = current_game["game"]
 
-    serving = current_game["score"]["serving"]  # 1 => home, 2 => away
+    serving = current_game["score"]["serving"]
     server_name = home_name if serving == 1 else away_name
 
-    # Verifica se o game terminou
+    # Checando se game terminou
     game_finished = (
-        "scoring" in current_game["score"] 
+        "scoring" in current_game["score"]
         and current_game["score"]["scoring"] != -1
     )
-
     game_id = (event_id, set_number, current_game_number)
 
-    # (A) Se o game terminou, checar se é o game que está bloqueando
+    # 1) Se o game terminou, checa se é o do lock
     if game_finished:
         if global_current_lock == game_id:
-            # Notificação final
             if lost_first_two_info:
-                winner = current_game["score"]["scoring"]  # 1 => home, 2 => away
+                winner = current_game["score"]["scoring"]
                 data = lost_first_two_info
                 if winner == data["server"]:
                     msg = (
-                        f"✅ {data['server_name']} PERDEU os dois primeiros pontos do game, "
-                        f"mas venceu ({game_slug}, set {set_number}, game {current_game_number})."
+                        f"✅ {data['server_name']} PERDEU 2 pontos e se recuperou, "
+                        f"vencendo o game ({game_slug}, set={set_number}, game={current_game_number})."
                     )
                 else:
                     msg = (
-                        f"❌ {data['server_name']} PERDEU os dois primeiros pontos do game "
-                        f"e acabou derrotado ({game_slug}, set {set_number}, game {current_game_number})."
+                        f"❌ {data['server_name']} PERDEU 2 pontos e acabou derrotado "
+                        f"({game_slug}, set={set_number}, game={current_game_number})."
                     )
                 await bot.send_message(chat_id=CHAT_ID, text=msg)
-                print("[FINAL de Game]:", msg)
+                print("[FINAL de game]:", msg)
 
-            # Libera o bloqueio
+            # Libera
             global_current_lock = None
             lost_first_two_info = {}
+            print("[DEBUG] Liberando lock global (game terminou).")
         return
 
-    # (B) Se o game não terminou e já existe um bloqueio global,
-    #     não faz nada (nem para a mesma partida nem para outra).
+    # 2) Se o game não terminou, mas há um lock, sai
     if global_current_lock is not None:
+        print("[DEBUG] Lock global ativo, não notificaremos esse game.")
         return
 
-    # (C) Se não há bloqueio, checa se o sacador perdeu 2 pontos iniciais.
+    # 3) Se não há lock, checa tie-break
     if current_set.get("tieBreak") is True:
-        return  # ignorar tie-break
+        print("[DEBUG] É tie-break, ignorando.")
+        return
 
     points = current_game["points"]
     if len(points) < 2:
+        print("[DEBUG] Ainda não há 2 pontos disputados.")
         return
 
     home_point_1 = points[0]["homePoint"]
@@ -128,10 +155,9 @@ async def process_game(session, event):
     )
 
     if lost_first_point and lost_second_point:
-        # Envia notificação e bloqueia globalmente
         msg = (
-            f"⚠️ {server_name} perdeu os DOIS primeiros pontos do game "
-            f"({game_slug}, set {set_number}, game {current_game_number})."
+            f"⚠️ {server_name} perdeu os dois primeiros pontos do game "
+            f"({game_slug}, set={set_number}, game={current_game_number})."
         )
         await bot.send_message(chat_id=CHAT_ID, text=msg)
         print("[INÍCIO de Game]:", msg)
@@ -141,29 +167,30 @@ async def process_game(session, event):
             "server": serving,
             "server_name": server_name
         }
+        print(f"[DEBUG] Lock global ATIVADO: {global_current_lock}")
 
 async def monitor_all_games():
-    await bot.send_message(chat_id=CHAT_ID, text="✅ Bot iniciado (bloqueio global)!")
-    print("Mensagem inicial enviada ao Telegram.")
+    await bot.send_message(chat_id=CHAT_ID, text="✅ Bot iniciado (com DEBUG)!")
+    print("Bot iniciado, mensagem de debug enviada ao Telegram.")
 
     async with aiohttp.ClientSession() as session:
         while True:
             try:
                 live_events = await fetch_live_events(session)
                 events = live_events.get("events", [])
-                print(f"Número de jogos ao vivo: {len(events)}")
+                print(f"\n[DEBUG] -> Número de jogos ao vivo: {len(events)}")
 
-                tasks = [process_game(session, event) for event in events]
+                tasks = [process_game(session, e) for e in events]
                 await asyncio.gather(*tasks)
 
                 await asyncio.sleep(3)
             except Exception as e:
-                print("Erro na execução:", e)
+                print("[ERROR] Erro na execução:", e)
                 await asyncio.sleep(5)
 
 if __name__ == "__main__":
     try:
-        print("Bot inicializando...")
+        print("Iniciando Bot com debug...")
         asyncio.run(monitor_all_games())
     except Exception as e:
-        print("Erro fatal ao iniciar o bot:", e)
+        print("Erro fatal:", e)
