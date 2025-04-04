@@ -8,21 +8,36 @@ CHAT_ID = os.environ['CHAT_ID']
 bot = Bot(token=BOT_TOKEN)
 
 games_notifications = {}
+blocked_proxies = set()
 
 PROXIES = [
-    "http://hwulpjky:zvnlcsm7rxvg@23.27.88.211:7213",
-    "http://hwulpjky:zvnlcsm7rxvg@179.61.172.101:6652",
-    "http://hwulpjky:zvnlcsm7rxvg@82.21.49.210:7473"
+    "http://hwulpjky:zvnlcsm7rxvg@159.148.239.74:6626",
+    "http://hwulpjky:zvnlcsm7rxvg@156.237.19.209:5606",
+    "http://hwulpjky:zvnlcsm7rxvg@82.21.39.204:7965",
+    "http://hwulpjky:zvnlcsm7rxvg@82.29.123.201:7466",
+    "http://hwulpjky:zvnlcsm7rxvg@63.246.137.77:5706",
+    "http://hwulpjky:zvnlcsm7rxvg@192.46.190.215:6808",
+    "http://hwulpjky:zvnlcsm7rxvg@192.46.189.214:6207",
+    "http://hwulpjky:zvnlcsm7rxvg@45.196.32.249:5881",
+    "http://hwulpjky:zvnlcsm7rxvg@63.246.130.66:6267",
+    "http://hwulpjky:zvnlcsm7rxvg@82.21.38.142:7403"
 ]
 proxy_index = 0
 
-def rotate_proxy():
+def blocked_proxies.add(proxy_index)
+        rotate_proxy():
     global proxy_index
-    proxy_index = (proxy_index + 1) % len(PROXIES)
-    return PROXIES[proxy_index]
+    available_proxies = [p for i, p in enumerate(PROXIES) if i not in blocked_proxies]
+    if not available_proxies:
+        print("[ERRO] Todos os proxies estão bloqueados. Reiniciando lista...")
+        blocked_proxies.clear()
+        available_proxies = PROXIES
+    proxy_index = (proxy_index + 1) % len(available_proxies)
+    return available_proxies[proxy_index]
 
 def get_current_proxy():
-    return PROXIES[proxy_index]
+    available_proxies = [p for i, p in enumerate(PROXIES) if i not in blocked_proxies]
+    return available_proxies[proxy_index % len(available_proxies)]
 
 async def fetch_live_events(session):
     url = "https://api.sofascore.com/api/v1/sport/tennis/events/live"
