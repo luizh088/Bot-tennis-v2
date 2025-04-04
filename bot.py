@@ -10,7 +10,7 @@ bot = Bot(token=BOT_TOKEN)
 games_notifications = {}
 
 async def fetch_live_events(session):
-    url = 'https://api.sofascore.com/api/v1/sport/tennis/events/live'
+    url = "https://api.sofascore.com/api/v1/sport/tennis/events/live"
     headers = {'User-Agent': 'Mozilla/5.0'}
     async with session.get(url, headers=headers) as response:
         return await response.json()
