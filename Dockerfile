@@ -9,4 +9,5 @@ RUN playwright install chromium
 
 COPY . .
 
-CMD ["python", "bot.py"]
+# Execute explicitamente com saída contínua no terminal
+CMD ["python", "-u", "bot.py"]
