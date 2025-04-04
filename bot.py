@@ -11,7 +11,14 @@ games_notifications = {}
 
 async def fetch_live_events(session):
     url = 'https://api.sofascore.com/api/v1/sport/tennis/events/live'
-    headers = {'User-Agent': 'Mozilla/5.0'}
+    headers = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+    'Accept': 'application/json, text/plain, */*',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Referer': 'https://www.sofascore.com/',
+    'Origin': 'https://www.sofascore.com',
+    'Connection': 'keep-alive'
+}
     async with session.get(url, headers=headers) as response:
         if response.content_type != 'application/json':
             text = await response.text()
