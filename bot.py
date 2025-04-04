@@ -9,27 +9,42 @@ bot = Bot(token=BOT_TOKEN)
 
 games_notifications = {}
 
+PROXY_USER = os.getenv("PROXY_USER")
+PROXY_PASS = os.getenv("PROXY_PASS")
+PROXY_HOST = os.getenv("PROXY_HOST")
+PROXY_PORT = os.getenv("PROXY_PORT")
+PROXY_URL = f"http://{PROXY_USER}:{PROXY_PASS}@{PROXY_HOST}:{PROXY_PORT}"
+
 async def fetch_live_events(session):
-    url = 'https://api.sofascore.com/api/v1/sport/tennis/events/live'
-    headers = {'User-Agent': 'Mozilla/5.0'}
-    async with session.get(url, headers=headers) as response:
+    url = "https://api.sofascore.com/api/v1/sport/tennis/events/live"
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+        'Accept': 'application/json, text/plain, */*',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Referer': 'https://www.sofascore.com/',
+        'Origin': 'https://www.sofascore.com',
+        'Connection': 'keep-alive'
+    }
+
+    async with session.get(url, headers=headers, proxy=PROXY_URL) as response:
+        if response.content_type != 'application/json':
+            text = await response.text()
+            print(f"[ERRO] Conteúdo inesperado da API (status {response.status}, tipo {response.content_type})")
+            print(f"Conteúdo recebido (corte 200 caracteres): {text[:200]}")
+            return {}
         return await response.json()
 
 async def fetch_point_by_point(session, event_id):
     url = f'https://api.sofascore.com/api/v1/event/{event_id}/point-by-point'
-    headers = {'User-Agent': 'Mozilla/5.0'}
-    async with session.get(url, headers=headers) as response:
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+    }
+    async with session.get(url, headers=headers, proxy=PROXY_URL) as response:
         return await response.json()
 
 async def process_game(session, event):
-    """
-    Verifica cada jogo "event", buscando dados "ponto a ponto" e 
-    envia notificações sobre quem perde os 2 primeiros pontos do saque
-    e também quem vence/perde o game de saque ao final do game.
-    """
     tournament_category = event['tournament']['category']['slug']
 
-    # Monitoramos apenas ATP/Challenger e apenas partidas de simples (type=1)
     if tournament_category not in ['atp', 'challenger'] or \
        event['homeTeam']['type'] != 1 or event['awayTeam']['type'] != 1:
         print(f"Ignorando torneio não-ATP/Challenger: {tournament_category}")
@@ -56,14 +71,11 @@ async def process_game(session, event):
     current_game_number = current_game["game"]
     serving = current_game["score"]["serving"]
 
-    # Definindo quem saca e quem recebe
     server_name = home_name if serving == 1 else away_name
     receiver_name = away_name if serving == 1 else home_name
 
-    # Lista de pontos do game atual
     points = current_game["points"]
 
-    # Verifica se o sacador perdeu o primeiro ponto
     home_point_first = points[0]["homePoint"]
     away_point_first = points[0]["awayPoint"]
     sacador_perdeu_primeiro_ponto = (
@@ -71,7 +83,6 @@ async def process_game(session, event):
         (serving == 2 and away_point_first == "0")
     )
 
-    # Verifica também se existe um segundo ponto e se o sacador o perdeu
     if sacador_perdeu_primeiro_ponto and len(points) >= 2:
         home_point_second = points[1]["homePoint"]
         away_point_second = points[1]["awayPoint"]
@@ -80,10 +91,7 @@ async def process_game(session, event):
             (serving == 2 and away_point_second == "0")
         )
 
-        # Se o sacador perdeu também o segundo ponto...
         if sacador_perdeu_segundo_ponto:
-            # 1) NOTIFICAÇÃO IMEDIATA (perdeu os 2 primeiros pontos sacando)
-            # Verifica se já enviamos essa notificação para este game
             if games_notifications.get(f"two_lost_{event_id}") != current_game_number:
                 message = (
                     f"⚠️ {server_name} perdeu os DOIS primeiros pontos sacando contra "
@@ -93,9 +101,6 @@ async def process_game(session, event):
                 print(f"Notificação enviada: {message}")
                 games_notifications[f"two_lost_{event_id}"] = current_game_number
 
-            # 2) NOTIFICAÇÃO DE GAME CONCLUÍDO
-            # Se o game já tiver um vencedor (score["scoring"] != -1)
-            # enviamos a mensagem de quem ganhou o game de saque
             if "scoring" in current_game["score"] and current_game["score"]["scoring"] != -1:
                 if games_notifications.get(f"completed_{event_id}") != current_game_number:
                     winner = current_game["score"]["scoring"]
@@ -115,9 +120,7 @@ async def process_game(session, event):
                     print(f"Notificação enviada: {message}")
                     games_notifications[f"completed_{event_id}"] = current_game_number
 
-
 async def monitor_all_games():
-    # Mensagem de teste no início, confirmando que o bot subiu.
     await bot.send_message(chat_id=CHAT_ID, text="✅ Bot iniciado corretamente e enviando notificações!")
     print("Mensagem de teste enviada ao Telegram.")
 
@@ -131,7 +134,6 @@ async def monitor_all_games():
                 tasks = [process_game(session, event) for event in events]
                 await asyncio.gather(*tasks)
 
-                # Aguarda 3 segundos para refazer as requisições
                 await asyncio.sleep(3)
             except Exception as e:
                 print(f"Erro na execução: {e}")
