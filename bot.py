@@ -9,12 +9,10 @@ bot = Bot(token=BOT_TOKEN)
 
 games_notifications = {}
 
-# Lista de proxies para rotação
+# Lista de proxies para rotação (atualizada)
 PROXIES = [
-    "http://hwulpjky:zvnlcsm7rxvg@45.196.60.31:6371",
-    "http://hwulpjky:zvnlcsm7rxvg@104.252.75.31:5401",
-    "http://hwulpjky:zvnlcsm7rxvg@103.130.178.224:5888",
-    "http://hwulpjky:zvnlcsm7rxvg@156.237.19.33:5430"
+    "http://hwulpjky:zvnlcsm7rxvg@179.61.172.101:6652",
+    "http://hwulpjky:zvnlcsm7rxvg@82.21.49.210:7473"
 ]
 proxy_index = 0
 
