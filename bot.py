@@ -9,11 +9,8 @@ bot = Bot(token=BOT_TOKEN)
 
 games_notifications = {}
 
-PROXY_USER = os.getenv("PROXY_USER")
-PROXY_PASS = os.getenv("PROXY_PASS")
-PROXY_HOST = os.getenv("PROXY_HOST")
-PROXY_PORT = os.getenv("PROXY_PORT")
-PROXY_URL = f"http://{PROXY_USER}:{PROXY_PASS}@{PROXY_HOST}:{PROXY_PORT}"
+# Proxy fixo da Webshare - substitua se quiser testar outro IP
+PROXY_URL = "http://hwulpjky:zvnlcsm7rxvg@104.252.75.31:5401"
 
 async def fetch_live_events(session):
     url = "https://api.sofascore.com/api/v1/sport/tennis/events/live"
