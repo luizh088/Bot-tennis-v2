@@ -9,8 +9,22 @@ bot = Bot(token=BOT_TOKEN)
 
 games_notifications = {}
 
-# Proxy fixo da Webshare - substitua se quiser testar outro IP
-PROXY_URL = "http://hwulpjky:zvnlcsm7rxvg@104.252.75.31:5401"
+# Lista de proxies para rotação
+PROXIES = [
+    "http://hwulpjky:zvnlcsm7rxvg@45.196.60.31:6371",
+    "http://hwulpjky:zvnlcsm7rxvg@104.252.75.31:5401",
+    "http://hwulpjky:zvnlcsm7rxvg@103.130.178.224:5888",
+    "http://hwulpjky:zvnlcsm7rxvg@156.237.19.33:5430"
+]
+proxy_index = 0
+
+def rotate_proxy():
+    global proxy_index
+    proxy_index = (proxy_index + 1) % len(PROXIES)
+    return PROXIES[proxy_index]
+
+def get_current_proxy():
+    return PROXIES[proxy_index]
 
 async def fetch_live_events(session):
     url = "https://api.sofascore.com/api/v1/sport/tennis/events/live"
@@ -23,21 +37,30 @@ async def fetch_live_events(session):
         'Connection': 'keep-alive'
     }
 
-    async with session.get(url, headers=headers, proxy=PROXY_URL, ssl=False) as response:
-        if response.content_type != 'application/json':
-            text = await response.text()
-            print(f"[ERRO] Conteúdo inesperado da API (status {response.status}, tipo {response.content_type})")
-            print(f"Conteúdo recebido (corte 200 caracteres): {text[:200]}")
-            return {}
-        return await response.json()
+    try:
+        async with session.get(url, headers=headers, proxy=get_current_proxy(), ssl=False) as response:
+            if response.content_type != 'application/json':
+                text = await response.text()
+                print(f"[ERRO] Conteúdo inesperado da API (status {response.status}, tipo {response.content_type})")
+                print(f"Conteúdo recebido (corte 200 caracteres): {text[:200]}")
+                raise Exception("Proxy bloqueado")
+            return await response.json()
+    except Exception as e:
+        print(f"[PROXY BLOQUEADO] Trocando proxy... Erro: {e}")
+        rotate_proxy()
+        return {}
 
 async def fetch_point_by_point(session, event_id):
     url = f'https://api.sofascore.com/api/v1/event/{event_id}/point-by-point'
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
     }
-    async with session.get(url, headers=headers, proxy=PROXY_URL, ssl=False) as response:
-        return await response.json()
+    try:
+        async with session.get(url, headers=headers, proxy=get_current_proxy(), ssl=False) as response:
+            return await response.json()
+    except Exception as e:
+        print(f"[ERRO ponto a ponto] Proxy pode estar bloqueado: {e}")
+        return {}
 
 async def process_game(session, event):
     tournament_category = event['tournament']['category']['slug']
