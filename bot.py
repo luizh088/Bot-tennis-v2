@@ -2,28 +2,32 @@ import os
 import asyncio
 import aiohttp
 from telegram import Bot
+import json
 
 BOT_TOKEN = os.environ['BOT_TOKEN']
 CHAT_ID = os.environ['CHAT_ID']
 bot = Bot(token=BOT_TOKEN)
 
+PROXY_BASE = "https://web-production-5ae8.up.railway.app/"
+
 games_notifications = {}
 
-PROXY_URL = "https://api.allorigins.win/get?url="
+async def fetch_via_proxy(session, url):
+    proxied_url = f"{PROXY_BASE}{url}"
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Origin": "https://meusite.com"
+    }
+    async with session.get(proxied_url, headers=headers) as response:
+        return await response.json()
 
 async def fetch_live_events(session):
-    target_url = 'https://api.sofascore.com/api/v1/sport/tennis/events/live'
-    proxied_url = PROXY_URL + target_url
-    async with session.get(proxied_url) as response:
-        result = await response.json()
-        return await response.json(content_type=None)
+    url = 'https://api.sofascore.com/api/v1/sport/tennis/events/live'
+    return await fetch_via_proxy(session, url)
 
 async def fetch_point_by_point(session, event_id):
-    target_url = f'https://api.sofascore.com/api/v1/event/{event_id}/point-by-point'
-    proxied_url = PROXY_URL + target_url
-    async with session.get(proxied_url) as response:
-        result = await response.json()
-        return await response.json(content_type=None)
+    url = f'https://api.sofascore.com/api/v1/event/{event_id}/point-by-point'
+    return await fetch_via_proxy(session, url)
 
 async def process_game(session, event):
     tournament_category = event['tournament']['category']['slug']
@@ -79,6 +83,24 @@ async def process_game(session, event):
                 )
                 await bot.send_message(chat_id=CHAT_ID, text=message)
                 games_notifications[f"two_lost_{event_id}"] = current_game_number
+
+            if "scoring" in current_game["score"] and current_game["score"]["scoring"] != -1:
+                if games_notifications.get(f"completed_{event_id}") != current_game_number:
+                    winner = current_game["score"]["scoring"]
+                    emoji = "✅" if winner == serving else "❌"
+                    if winner == serving:
+                        message = (
+                            f"{emoji} {server_name} venceu o game de saque "
+                            f"({game_slug}, game {current_game_number})."
+                        )
+                    else:
+                        message = (
+                            f"{emoji} {server_name} perdeu o game de saque "
+                            f"({game_slug}, game {current_game_number})."
+                        )
+
+                    await bot.send_message(chat_id=CHAT_ID, text=message)
+                    games_notifications[f"completed_{event_id}"] = current_game_number
 
 async def monitor_all_games():
     await bot.send_message(chat_id=CHAT_ID, text="✅ Bot iniciado corretamente e enviando notificações!")
