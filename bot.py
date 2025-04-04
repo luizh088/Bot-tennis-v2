@@ -11,13 +11,27 @@ games_notifications = {}
 
 async def fetch_live_events(session):
     url = 'https://api.sofascore.com/api/v1/sport/tennis/events/live'
-    headers = {'User-Agent': 'Mozilla/5.0'}
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Safari/537.36',
+        'Accept': 'application/json',
+        'Referer': 'https://www.sofascore.com/',
+        'Origin': 'https://www.sofascore.com',
+    }
     async with session.get(url, headers=headers) as response:
-        return await response.json()
+        if response.headers.get('Content-Type', '').startswith('application/json'):
+            return await response.json()
+        else:
+            text = await response.text()
+            raise ValueError(f"Resposta inesperada: {text[:200]}")
 
 async def fetch_point_by_point(session, event_id):
     url = f'https://api.sofascore.com/api/v1/event/{event_id}/point-by-point'
-    headers = {'User-Agent': 'Mozilla/5.0'}
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Safari/537.36',
+        'Accept': 'application/json',
+        'Referer': 'https://www.sofascore.com/',
+        'Origin': 'https://www.sofascore.com',
+    }
     async with session.get(url, headers=headers) as response:
         return await response.json()
 
