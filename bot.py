@@ -103,19 +103,31 @@ async def process_game(session, event):
                     games_notifications[f"completed_{event_id}"] = current_game_number
 
 async def monitor_all_games():
-    await bot.send_message(chat_id=CHAT_ID, text="✅ Bot iniciado corretamente e enviando notificações!")
+    try:
+        await bot.send_message(chat_id=CHAT_ID, text="✅ Bot iniciado corretamente e enviando notificações!")
+        print("✅ Bot Telegram notificado com sucesso.")
+    except Exception as e:
+        print(f"❌ Erro ao notificar início do bot: {e}")
 
     async with aiohttp.ClientSession() as session:
         while True:
             try:
+                print("🔄 Buscando eventos ao vivo...")
                 live_events = await fetch_live_events(session)
                 events = live_events.get('events', [])
+                print(f"🎾 Total de jogos encontrados: {len(events)}")
                 tasks = [process_game(session, event) for event in events]
                 await asyncio.gather(*tasks)
                 await asyncio.sleep(5)
             except Exception as e:
-                print(f"Erro na execução: {e}")
+                print(f"❌ Erro na execução do loop principal: {e}")
                 await asyncio.sleep(5)
 
 if __name__ == '__main__':
-    asyncio.run(monitor_all_games())
+    try:
+        print("🚀 Iniciando o bot...")
+        print(f"🔐 BOT_TOKEN definido? {'Sim' if BOT_TOKEN else 'Não'}")
+        print(f"📬 CHAT_ID definido? {'Sim' if CHAT_ID else 'Não'}")
+        asyncio.run(monitor_all_games())
+    except Exception as e:
+        print(f"💥 Erro fatal ao iniciar o bot: {e}")
