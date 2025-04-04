@@ -26,7 +26,7 @@ async def fetch_live_events(session):
         'Connection': 'keep-alive'
     }
 
-    async with session.get(url, headers=headers, proxy=PROXY_URL) as response:
+    async with session.get(url, headers=headers, proxy=PROXY_URL, ssl=False) as response:
         if response.content_type != 'application/json':
             text = await response.text()
             print(f"[ERRO] Conteúdo inesperado da API (status {response.status}, tipo {response.content_type})")
@@ -39,7 +39,7 @@ async def fetch_point_by_point(session, event_id):
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
     }
-    async with session.get(url, headers=headers, proxy=PROXY_URL) as response:
+    async with session.get(url, headers=headers, proxy=PROXY_URL, ssl=False) as response:
         return await response.json()
 
 async def process_game(session, event):
