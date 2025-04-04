@@ -1,44 +1,53 @@
 import os
 import asyncio
-import aiohttp
+from playwright.async_api import async_playwright
+from bs4 import BeautifulSoup
 from telegram import Bot
 
 BOT_TOKEN = os.environ['BOT_TOKEN']
 CHAT_ID = os.environ['CHAT_ID']
 bot = Bot(token=BOT_TOKEN)
 
-PROXY_URL = "https://corsproxy.io/?"
 games_notifications = {}
 
-async def fetch_live_events(session):
-    target_url = 'https://api.sofascore.com/api/v1/sport/tennis/events/live'
-    proxied_url = PROXY_URL + target_url
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/122.0 Safari/537.36',
-        'Accept': 'application/json',
-        'Referer': 'https://www.sofascore.com/',
-        'Origin': 'https://www.sofascore.com',
-    }
-    async with session.get(proxied_url, headers=headers) as response:
-        return await response.json()
+async def fetch_live_events(page):
+    await page.goto('https://www.sofascore.com/tennis/livescore')
+    await page.wait_for_selector('.event-list-item')
+    html = await page.content()
+    soup = BeautifulSoup(html, 'html.parser')
 
-async def fetch_point_by_point(session, event_id):
-    target_url = f'https://api.sofascore.com/api/v1/event/{event_id}/point-by-point'
-    proxied_url = PROXY_URL + target_url
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/122.0 Safari/537.36',
-        'Accept': 'application/json',
-        'Referer': 'https://www.sofascore.com/',
-        'Origin': 'https://www.sofascore.com',
-    }
-    async with session.get(proxied_url, headers=headers) as response:
-        return await response.json()
+    events = []
+    for item in soup.select('.event-list-item'):
+        event_id = item['id'].split('-')[-1]
+        home_name = item.select_one('.home-team').text.strip()
+        away_name = item.select_one('.away-team').text.strip()
+        tournament_slug = item.select_one('.cell__section--category').text.strip().lower()
 
-async def process_game(session, event):
+        events.append({
+            'id': event_id,
+            'homeTeam': {'shortName': home_name, 'type': 1},
+            'awayTeam': {'shortName': away_name, 'type': 1},
+            'tournament': {'category': {'slug': tournament_slug}}
+        })
+
+    return events
+
+async def fetch_point_by_point(page, event_id):
+    url = f'https://www.sofascore.com/event/{event_id}/point-by-point'
+    await page.goto(url)
+    await page.wait_for_selector('.point-by-point')
+    html = await page.content()
+    soup = BeautifulSoup(html, 'html.parser')
+
+    points_elements = soup.select('.point-by-point .point')
+    points = [{'text': p.text.strip()} for p in points_elements]
+
+    return points
+
+async def process_game(page, event):
     tournament_category = event['tournament']['category']['slug']
 
-    if tournament_category not in ['atp', 'challenger'] or \
-       event['homeTeam']['type'] != 1 or event['awayTeam']['type'] != 1:
+    if tournament_category not in ['atp', 'challenger']:
         return
 
     event_id = event['id']
@@ -46,73 +55,44 @@ async def process_game(session, event):
     away_name = event['awayTeam']['shortName']
     game_slug = f"{home_name} x {away_name}"
 
-    point_data = await fetch_point_by_point(session, event_id)
+    points = await fetch_point_by_point(page, event_id)
 
-    if "pointByPoint" not in point_data or not point_data["pointByPoint"]:
+    if len(points) < 2:
         return
 
-    current_set = point_data["pointByPoint"][0]
-    current_game = current_set["games"][0] if current_set["games"] else None
+    first_point = points[0]['text']
+    second_point = points[1]['text']
 
-    if not current_game or not current_game.get("points"):
-        return
+    if "0-15" in first_point and "0-30" in second_point:
+        if games_notifications.get(f"two_lost_{event_id}") != first_point:
+            message = f"⚠️ Sacador perdeu os DOIS primeiros pontos no jogo {game_slug}."
+            await bot.send_message(chat_id=CHAT_ID, text=message)
+            games_notifications[f"two_lost_{event_id}"] = first_point
 
-    current_game_number = current_game["game"]
-    serving = current_game["score"]["serving"]
-    server_name = home_name if serving == 1 else away_name
-    receiver_name = away_name if serving == 1 else home_name
-    points = current_game["points"]
-
-    home_point_first = points[0]["homePoint"]
-    away_point_first = points[0]["awayPoint"]
-    sacador_perdeu_primeiro_ponto = (
-        (serving == 1 and home_point_first == "0") or
-        (serving == 2 and away_point_first == "0")
-    )
-
-    if sacador_perdeu_primeiro_ponto and len(points) >= 2:
-        home_point_second = points[1]["homePoint"]
-        away_point_second = points[1]["awayPoint"]
-        sacador_perdeu_segundo_ponto = (
-            (serving == 1 and home_point_second == "0") or
-            (serving == 2 and away_point_second == "0")
-        )
-
-        if sacador_perdeu_segundo_ponto:
-            if games_notifications.get(f"two_lost_{event_id}") != current_game_number:
-                message = (
-                    f"⚠️ {server_name} perdeu os DOIS primeiros pontos sacando contra "
-                    f"{receiver_name} ({game_slug}, game {current_game_number})."
-                )
-                await bot.send_message(chat_id=CHAT_ID, text=message)
-                games_notifications[f"two_lost_{event_id}"] = current_game_number
-
-            if "scoring" in current_game["score"] and current_game["score"]["scoring"] != -1:
-                if games_notifications.get(f"completed_{event_id}") != current_game_number:
-                    winner = current_game["score"]["scoring"]
-                    emoji = "✅" if winner == serving else "❌"
-                    result = "venceu" if winner == serving else "perdeu"
-                    message = (
-                        f"{emoji} {server_name} {result} o game de saque "
-                        f"({game_slug}, game {current_game_number})."
-                    )
-                    await bot.send_message(chat_id=CHAT_ID, text=message)
-                    games_notifications[f"completed_{event_id}"] = current_game_number
+    last_point = points[-1]['text']
+    if "Game" in last_point:
+        if games_notifications.get(f"completed_{event_id}") != last_point:
+            emoji = "✅" if "Game won by server" in last_point else "❌"
+            message = f"{emoji} Resultado do game: {last_point} ({game_slug})."
+            await bot.send_message(chat_id=CHAT_ID, text=message)
+            games_notifications[f"completed_{event_id}"] = last_point
 
 async def monitor_all_games():
     await bot.send_message(chat_id=CHAT_ID, text="✅ Bot iniciado corretamente e enviando notificações!")
 
-    async with aiohttp.ClientSession() as session:
+    async with async_playwright() as pw:
+        browser = await pw.chromium.launch(headless=True)
+        page = await browser.new_page()
+
         while True:
             try:
-                live_events = await fetch_live_events(session)
-                events = live_events.get('events', [])
-                tasks = [process_game(session, event) for event in events]
+                events = await fetch_live_events(page)
+                tasks = [process_game(page, event) for event in events]
                 await asyncio.gather(*tasks)
-                await asyncio.sleep(3)
+                await asyncio.sleep(5)
             except Exception as e:
                 print(f"Erro na execução: {e}")
-                await asyncio.sleep(3)
+                await asyncio.sleep(5)
 
 if __name__ == '__main__':
     asyncio.run(monitor_all_games())
