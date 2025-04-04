@@ -9,8 +9,8 @@ bot = Bot(token=BOT_TOKEN)
 
 games_notifications = {}
 
-# Lista de proxies para rotação (atualizada)
 PROXIES = [
+    "http://hwulpjky:zvnlcsm7rxvg@23.27.88.211:7213",
     "http://hwulpjky:zvnlcsm7rxvg@179.61.172.101:6652",
     "http://hwulpjky:zvnlcsm7rxvg@82.21.49.210:7473"
 ]
@@ -58,6 +58,7 @@ async def fetch_point_by_point(session, event_id):
             return await response.json()
     except Exception as e:
         print(f"[ERRO ponto a ponto] Proxy pode estar bloqueado: {e}")
+        rotate_proxy()
         return {}
 
 async def process_game(session, event):
@@ -137,6 +138,7 @@ async def process_game(session, event):
                     await bot.send_message(chat_id=CHAT_ID, text=message)
                     print(f"Notificação enviada: {message}")
                     games_notifications[f"completed_{event_id}"] = current_game_number
+
 
 async def monitor_all_games():
     await bot.send_message(chat_id=CHAT_ID, text="✅ Bot iniciado corretamente e enviando notificações!")
