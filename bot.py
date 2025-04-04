@@ -4,81 +4,99 @@ from playwright.async_api import async_playwright
 from bs4 import BeautifulSoup
 from telegram import Bot
 
-BOT_TOKEN = os.environ['BOT_TOKEN']
-CHAT_ID = os.environ['CHAT_ID']
+BOT_TOKEN = os.getenv('BOT_TOKEN')
+CHAT_ID = os.getenv('CHAT_ID')
 bot = Bot(token=BOT_TOKEN)
 
 games_notifications = {}
 
 async def fetch_live_events(page):
-    await page.goto('https://www.sofascore.com/tennis/livescore')
-    await page.wait_for_selector('.event-list-item')
-    html = await page.content()
-    soup = BeautifulSoup(html, 'html.parser')
+    try:
+        await page.goto('https://www.sofascore.com/tennis/livescore')
+        await page.wait_for_selector('.event-list-item', timeout=15000)
+        html = await page.content()
+        soup = BeautifulSoup(html, 'html.parser')
 
-    events = []
-    for item in soup.select('.event-list-item'):
-        event_id = item['id'].split('-')[-1]
-        home_name = item.select_one('.home-team').text.strip()
-        away_name = item.select_one('.away-team').text.strip()
-        tournament_slug = item.select_one('.cell__section--category').text.strip().lower()
+        events = []
+        for item in soup.select('.event-list-item'):
+            event_id = item['id'].split('-')[-1]
+            home_name = item.select_one('.home-team').text.strip()
+            away_name = item.select_one('.away-team').text.strip()
+            tournament_slug = item.select_one('.cell__section--category').text.strip().lower()
 
-        events.append({
-            'id': event_id,
-            'homeTeam': {'shortName': home_name, 'type': 1},
-            'awayTeam': {'shortName': away_name, 'type': 1},
-            'tournament': {'category': {'slug': tournament_slug}}
-        })
+            events.append({
+                'id': event_id,
+                'homeTeam': {'shortName': home_name, 'type': 1},
+                'awayTeam': {'shortName': away_name, 'type': 1},
+                'tournament': {'category': {'slug': tournament_slug}}
+            })
 
-    return events
+        return events
+    except Exception as e:
+        print(f"Erro em fetch_live_events: {e}")
+        return []
 
 async def fetch_point_by_point(page, event_id):
-    url = f'https://www.sofascore.com/event/{event_id}/point-by-point'
-    await page.goto(url)
-    await page.wait_for_selector('.point-by-point')
-    html = await page.content()
-    soup = BeautifulSoup(html, 'html.parser')
+    try:
+        url = f'https://www.sofascore.com/event/{event_id}/point-by-point'
+        await page.goto(url)
+        await page.wait_for_selector('.point-by-point', timeout=15000)
+        html = await page.content()
+        soup = BeautifulSoup(html, 'html.parser')
 
-    points_elements = soup.select('.point-by-point .point')
-    points = [{'text': p.text.strip()} for p in points_elements]
+        points_elements = soup.select('.point-by-point .point')
+        points = [{'text': p.text.strip()} for p in points_elements]
 
-    return points
+        return points
+    except Exception as e:
+        print(f"Erro em fetch_point_by_point (ID: {event_id}): {e}")
+        return []
 
 async def process_game(page, event):
-    tournament_category = event['tournament']['category']['slug']
+    try:
+        tournament_category = event['tournament']['category']['slug']
 
-    if tournament_category not in ['atp', 'challenger']:
-        return
+        if tournament_category not in ['atp', 'challenger']:
+            return
 
-    event_id = event['id']
-    home_name = event['homeTeam']['shortName']
-    away_name = event['awayTeam']['shortName']
-    game_slug = f"{home_name} x {away_name}"
+        event_id = event['id']
+        home_name = event['homeTeam']['shortName']
+        away_name = event['awayTeam']['shortName']
+        game_slug = f"{home_name} x {away_name}"
 
-    points = await fetch_point_by_point(page, event_id)
+        points = await fetch_point_by_point(page, event_id)
 
-    if len(points) < 2:
-        return
+        if len(points) < 2:
+            return
 
-    first_point = points[0]['text']
-    second_point = points[1]['text']
+        first_point = points[0]['text']
+        second_point = points[1]['text']
 
-    if "0-15" in first_point and "0-30" in second_point:
-        if games_notifications.get(f"two_lost_{event_id}") != first_point:
-            message = f"⚠️ Sacador perdeu os DOIS primeiros pontos no jogo {game_slug}."
-            await bot.send_message(chat_id=CHAT_ID, text=message)
-            games_notifications[f"two_lost_{event_id}"] = first_point
+        if "0-15" in first_point and "0-30" in second_point:
+            if games_notifications.get(f"two_lost_{event_id}") != first_point:
+                message = f"⚠️ Sacador perdeu os DOIS primeiros pontos no jogo {game_slug}."
+                await bot.send_message(chat_id=CHAT_ID, text=message)
+                games_notifications[f"two_lost_{event_id}"] = first_point
 
-    last_point = points[-1]['text']
-    if "Game" in last_point:
-        if games_notifications.get(f"completed_{event_id}") != last_point:
-            emoji = "✅" if "Game won by server" in last_point else "❌"
-            message = f"{emoji} Resultado do game: {last_point} ({game_slug})."
-            await bot.send_message(chat_id=CHAT_ID, text=message)
-            games_notifications[f"completed_{event_id}"] = last_point
+        last_point = points[-1]['text']
+        if "Game" in last_point:
+            if games_notifications.get(f"completed_{event_id}") != last_point:
+                emoji = "✅" if "Game won by server" in last_point else "❌"
+                message = f"{emoji} Resultado do game: {last_point} ({game_slug})."
+                await bot.send_message(chat_id=CHAT_ID, text=message)
+                games_notifications[f"completed_{event_id}"] = last_point
+    except Exception as e:
+        print(f"Erro em process_game (ID: {event.get('id', 'N/A')}): {e}")
 
 async def monitor_all_games():
-    await bot.send_message(chat_id=CHAT_ID, text="✅ Bot iniciado corretamente e enviando notificações!")
+    if not BOT_TOKEN or not CHAT_ID:
+        print("Variáveis BOT_TOKEN ou CHAT_ID não definidas.")
+        return
+
+    try:
+        await bot.send_message(chat_id=CHAT_ID, text="✅ Bot iniciado corretamente e enviando notificações!")
+    except Exception as e:
+        print(f"Erro ao enviar mensagem inicial: {e}")
 
     async with async_playwright() as pw:
         browser = await pw.chromium.launch(headless=True)
@@ -91,7 +109,7 @@ async def monitor_all_games():
                 await asyncio.gather(*tasks)
                 await asyncio.sleep(5)
             except Exception as e:
-                print(f"Erro na execução: {e}")
+                print(f"Erro na execução principal: {e}")
                 await asyncio.sleep(5)
 
 if __name__ == '__main__':
