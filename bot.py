@@ -8,7 +8,7 @@ BOT_TOKEN = os.environ['BOT_TOKEN']
 CHAT_ID = os.environ['CHAT_ID']
 bot = Bot(token=BOT_TOKEN)
 
-PROXY_BASE = "https://web-production-5ae8.up.railway.app/"
+PROXY_BASE = "https://web-production-ea045.up.railway.app/"
 
 games_notifications = {}
 
