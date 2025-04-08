@@ -16,10 +16,21 @@ async def fetch_via_proxy(session, url):
     proxied_url = f"{PROXY_BASE}{url}"
     headers = {
         "User-Agent": "Mozilla/5.0",
-        "Origin": "https://meusite.com"
+        "Origin": "https://meusite.com",
+        "Accept": "application/json"
     }
-    async with session.get(proxied_url, headers=headers) as response:
-        return await response.json()
+    try:
+        async with session.get(proxied_url, headers=headers) as response:
+            print(f"📡 {response.status} → {proxied_url}")
+            text = await response.text()
+            try:
+                return json.loads(text)
+            except Exception as e:
+                print(f"⚠️ JSON inválido recebido:\n{text}")
+                return {}
+    except Exception as e:
+        print(f"❌ Erro em fetch_via_proxy: {e} ({proxied_url})")
+        return {}
 
 async def fetch_live_events(session):
     url = 'https://api.sofascore.com/api/v1/sport/tennis/events/live'
